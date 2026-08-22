@@ -86,7 +86,16 @@ def health_check():
     description="Returns all tasks in the to-do list."
 )
 def get_tasks():
-    return tasks
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tasks")
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [
+        {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
+        for row in rows
+    ]
 
 
 @app.get(
@@ -95,14 +104,19 @@ def get_tasks():
     description="Returns a task by its ID. Returns 404 if the task does not exist."
 )
 def get_task(task_id: int):
-    for task in tasks:
-        if task["id"] == task_id:
-            return task
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    conn.close()
 
-    raise HTTPException(
-        status_code=404,
-        detail=f"Task {task_id} not found"
-    )
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Task {task_id} not found"
+        )
+
+    return {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
 
 
 @app.post(
