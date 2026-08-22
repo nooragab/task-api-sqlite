@@ -132,15 +132,18 @@ def create_task(task: dict):
             detail="Title is required"
         )
 
-    new_task = {
-        "id": max([t["id"] for t in tasks]) + 1,
-        "title": task["title"],
-        "done": False
-    }
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO tasks (title, done) VALUES (?, ?)",
+        (task["title"], False)
+    )
+    conn.commit()
 
-    tasks.append(new_task)
+    new_id = cursor.lastrowid
+    conn.close()
 
-    return new_task
+    return {"id": new_id, "title": task["title"], "done": False}
 
 
 @app.put(
