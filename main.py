@@ -12,13 +12,21 @@ DB_FILE = "tasks.db"
 
 
 def get_connection():
-    """Returns a connection to the SQLite database."""
+    """Opens a new connection to the SQLite database file.
+
+    check_same_thread=False lets FastAPI use this connection function
+    from different request-handling threads safely for our simple case.
+    row_factory makes rows behave like dictionaries (row["title"] instead
+    of row[1]), which keeps our API responses looking the same as before.
+    """
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db():
+    """Creates the tasks table if it doesn't exist yet, and seeds it
+    with 3 example tasks only if the table is currently empty."""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -78,16 +86,7 @@ def health_check():
     description="Returns all tasks in the to-do list."
 )
 def get_tasks():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM tasks")
-    rows = cursor.fetchall()
-    conn.close()
-
-    return [
-        {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
-        for row in rows
-    ]
+    return tasks
 
 
 @app.get(
@@ -96,19 +95,14 @@ def get_tasks():
     description="Returns a task by its ID. Returns 404 if the task does not exist."
 )
 def get_task(task_id: int):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
-    row = cursor.fetchone()
-    conn.close()
+    for task in tasks:
+        if task["id"] == task_id:
+            return task
 
-    if row is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Task {task_id} not found"
-        )
-
-    return {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
+    raise HTTPException(
+        status_code=404,
+        detail=f"Task {task_id} not found"
+    )
 
 
 @app.post(
@@ -124,18 +118,15 @@ def create_task(task: dict):
             detail="Title is required"
         )
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO tasks (title, done) VALUES (?, ?)",
-        (task["title"], False)
-    )
-    conn.commit()
+    new_task = {
+        "id": max([t["id"] for t in tasks]) + 1,
+        "title": task["title"],
+        "done": False
+    }
 
-    new_id = cursor.lastrowid
-    conn.close()
+    tasks.append(new_task)
 
-    return {"id": new_id, "title": task["title"], "done": False}
+    return new_task
 
 
 @app.put(
@@ -168,30 +159,20 @@ def update_task(task_id: int, task: dict):
             detail="Done must be true or false"
         )
 
-    conn = get_connection()
-    cursor = conn.cursor()
+    for existing_task in tasks:
+        if existing_task["id"] == task_id:
+            if "title" in task:
+                existing_task["title"] = task["title"]
 
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
-    existing_task = cursor.fetchone()
+            if "done" in task:
+                existing_task["done"] = task["done"]
 
-    if existing_task is None:
-        conn.close()
-        raise HTTPException(
-            status_code=404,
-            detail=f"Task {task_id} not found"
-        )
+            return existing_task
 
-    new_title = task["title"] if "title" in task else existing_task["title"]
-    new_done = task["done"] if "done" in task else bool(existing_task["done"])
-
-    cursor.execute(
-        "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
-        (new_title, new_done, task_id)
+    raise HTTPException(
+        status_code=404,
+        detail=f"Task {task_id} not found"
     )
-    conn.commit()
-    conn.close()
-
-    return {"id": task_id, "title": new_title, "done": new_done}
 
 
 @app.delete(
@@ -201,20 +182,12 @@ def update_task(task_id: int, task: dict):
     description="Deletes an existing task by its ID."
 )
 def delete_task(task_id: int):
-    conn = get_connection()
-    cursor = conn.cursor()
+    for i, task in enumerate(tasks):
+        if task["id"] == task_id:
+            tasks.pop(i)
+            return
 
-    cursor.execute("SELECT id FROM tasks WHERE id = ?", (task_id,))
-    existing_task = cursor.fetchone()
-
-    if existing_task is None:
-        conn.close()
-        raise HTTPException(
-            status_code=404,
-            detail=f"Task {task_id} not found"
-        )
-
-    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    conn.commit()
-    conn.close()
-    return
+    raise HTTPException(
+        status_code=404,
+        detail=f"Task {task_id} not found"
+    )
